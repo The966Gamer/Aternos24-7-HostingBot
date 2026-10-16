@@ -1,18 +1,18 @@
 {
   "name": "AFK Bot",
   "bot-account": {
-    "username": "YourBotUsername",
+    "username": "TheKeeperOfChuds",
     "password": "",
     "type": "offline"
   },
   "server": {
-    "ip": "your.server.ip",
+    "ip": "thechudsmp.falix.me",
     "port": 25565,
     "version": "",
     "try-creative": false
   },
   "position": {
-    "enabled": true,
+    "enabled": false,
     "x": 0,
     "y": 100,
     "z": 0
@@ -31,8 +31,8 @@
       "repeat": true,
       "repeat-delay": 120,
       "messages": [
-        "I'm a regular player",
-        "I like to play Minecraft!"
+        "WITHOUT ME YOU ARE NOTHING",
+        "I AM THE KEEPER OF CHUDS!!!"
       ]
     },
     "chat-log": true,
