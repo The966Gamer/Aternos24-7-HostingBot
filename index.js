@@ -146,7 +146,7 @@ function initBot() {
   bot.on('health', () => {
     if (!bot || !bot.entity) return;
 
-    // Trigger action only if health drops from taking hits [1]
+    // Trigger action only if health drops from taking hits
     if (bot.health < lastHealth) {
       console.log(`[Alert] Damage taken! Current Health: ${bot.health}. Engaging counter-strike...`);
       retaliate();
@@ -169,13 +169,13 @@ function initBot() {
 // Targeted Combat Self-Defense Framework
 // ----------------------------------------------------
 function retaliate() {
-  if (!bot || !botState.connected) return;
+  if (!bot || !botState.connected || !bot.entity) return;
 
-  // Search a 12-block target radius for what hit it [1]
+  // Search a 12-block target radius for what hit it
   const target = bot.nearestEntity((entity) => {
     return (entity.type === 'mob' || entity.type === 'player') && entity.position.distanceTo(bot.entity.position)  retaliate(), 600);
   } else {
-    // Pathfind dash to close distance if they distance themselves [1]
+    // Pathfind dash to close distance if they distance themselves
     console.log(`[Closing Gap] Moving toward target at: ${Math.floor(target.position.x)}, ${Math.floor(target.position.z)}`);
     
     const goal = new GoalBlock(Math.floor(target.position.x), Math.floor(target.position.y), Math.floor(target.position.z));
