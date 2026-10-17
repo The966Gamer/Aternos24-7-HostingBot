@@ -7,7 +7,7 @@ const config = require('./settings.json');
 const express = require('express');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080; // Swapped to 8080 to match your log layout
 
 let bot = null;
 let reconnectTimeoutId = null;
@@ -113,7 +113,6 @@ function initBot() {
   if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
   console.log(`[Connecting] Attempting login for: ${config['bot-account'].username}`);
 
-  // Safely clean up name and set fallback parameters
   const cleanUsername = config['bot-account'].username.trim().replace(/[^a-zA-Z0-9_]/g, '');
 
   bot = mineflayer.createBot({
@@ -126,32 +125,29 @@ function initBot() {
 
   bot.loadPlugin(pathfinder);
 
-  // CRITICAL FIX: Kill all physics on joining to stabilize connection and stop desync timeouts
   bot.once('spawn', () => {
-    if (bot.physics) bot.physics.enabled = false;
     botState.connected = true;
     console.log(`[Spawned] ${bot.username} joined successfully. Downloading chunks...`);
 
-    // Handle Auth registration commands if enabled
+    // SAFETY CHECK: Ensure bot exists before executing auth commands
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
+        if (!bot || !botState.connected) return; // Crash prevention catch
         bot.chat(`/register ${config.utils['auto-auth'].password} ${config.utils['auto-auth'].password}`);
         bot.chat(`/login ${config.utils['auto-auth'].password}`);
       }, 1500);
     }
 
-    // Wait 5 seconds to guarantee full synchronization before movement ticks execute
+    // Safely delay custom AI ticks to prevent packet rate kicks during login loading
     setTimeout(() => {
-      if (!bot || !bot.physics) return;
-      bot.physics.enabled = true;
-      console.log('[Active] Bot physics pipeline cleared. Activating custom loops.');
+      if (!bot || !botState.connected) return;
+      console.log('[Active] Bot chunk sync settled. Activating movements.');
 
       const movements = new Movements(bot);
       bot.pathfinder.setMovements(movements);
 
-      // Trigger movement and automated anti-afk features safely
       startBehaviorLoops();
-    }, 5000);
+    }, 4000);
   });
 
   bot.on('error', (err) => {
@@ -210,7 +206,6 @@ function startBehaviorLoops() {
     const walkInt = setInterval(() => {
       if (!bot || !botState.connected) return;
       bot.setControlState('forward', true);
-      // Simulates steering to complete a curved paths loop without triggering packet limit kicks
       angle += 0.2;
       bot.look(angle, 0, true);
     }, 150);
@@ -218,11 +213,16 @@ function startBehaviorLoops() {
   }
 }
 
+function deleteConfigTimers() {
+  // Safe helper to empty background triggers
+  if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+}
+
 function clearBehaviorLoops() {
   movementIntervals.forEach(clearInterval);
   movementIntervals = [];
   if (bot) {
-    bot.clearControlStates();
+    try { bot.clearControlStates(); } catch (e) {}
   }
 }
 
