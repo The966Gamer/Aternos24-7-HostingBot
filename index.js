@@ -1,8 +1,6 @@
 'use strict';
 
 const mineflayer = require('mineflayer');
-const { Movements, pathfinder, goals } = require('mineflayer-pathfinder');
-const { GoalBlock } = goals;
 const config = require('./settings.json');
 const express = require('express');
 
@@ -14,7 +12,6 @@ let reconnectTimeoutId = null;
 let connectionTimeoutId = null;
 let chatIntervalId = null;
 let isReconnecting = false;
-let lastHealth = 20;
 
 let botState = {
   connected: false,
@@ -67,14 +64,14 @@ app.get('/', (req, res) => {
             <div class="label">Server Link</div>
             <div class="value" style="font-size:1.1rem;color:#5eead4;">${config.server.ip}:${config.server.port}</div>
           </div>
-          <div class="footer">Defensive Combat AFK Dashboard</div>
+          <div class="footer">Infinite Anti-AFK Monitoring Dashboard</div>
         </div>
         <script>
           async function update() {
             try {
               const r = await fetch('/health');
               const d = await r.json();
-              document.getElementById('status-text').innerText = d.status === 'connected' ? 'Online & Guarding' : 'Reconnecting...';
+              document.getElementById('status-text').innerText = d.status === 'connected' ? 'Online & Idling' : 'Reconnecting...';
               document.getElementById('status-dot').className = d.status === 'connected' ? 'dot pulse' : 'dot offline pulse';
             } catch (e) {}
           }
@@ -91,11 +88,11 @@ app.get('/health', (req, res) => {
 });
 
 // ----------------------------------------------------
-// Core Mineflayer Handshake & Retaliation Modules
+// Core Lifecycle Engine
 // ----------------------------------------------------
 function initBot() {
   if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
-  console.log(`[Connecting] Initializing reactive combat guard for: ${config['bot-account'].username}`);
+  console.log(`[Connecting] Initializing static AFK session for: ${config['bot-account'].username}`);
 
   const cleanUsername = config['bot-account'].username.trim().replace(/[^a-zA-Z0-9_]/g, '');
 
@@ -107,20 +104,13 @@ function initBot() {
     auth: config['bot-account'].type === 'offline' ? 'offline' : 'microsoft'
   });
 
-  bot.loadPlugin(pathfinder);
-
   bot.once('spawn', () => {
     botState.connected = true;
     botState.reconnectAttempts = 0;
     bot.clearControlStates();
-    
-    if (bot.entity) lastHealth = bot.health;
-    console.log(`[Spawned] ${bot.username} standing guard. Movement restricted until attacked.`);
+    console.log(`[Spawned] ${bot.username} safely logged in. Standby mode active.`);
 
-    const movements = new Movements(bot);
-    bot.pathfinder.setMovements(movements);
-
-    // Handle authentication hooks safely
+    // Secure cracked registration routines
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
         if (!bot || !botState.connected) return;
@@ -129,7 +119,7 @@ function initBot() {
       }, 2000);
     }
 
-    // Server-keeping anti-AFK chat broadcasts
+    // Chat looping engine to trick baseline server clear counters
     if (config.utils['chat-messages'].enabled) {
       if (chatIntervalId) clearInterval(chatIntervalId);
       let msgIdx = 0;
@@ -140,18 +130,6 @@ function initBot() {
         msgIdx = (msgIdx + 1) % msgs.length;
       }, config.utils['chat-messages']['repeat-delay'] * 1000);
     }
-  });
-
-  // COMBAT TRIGGER MODULE
-  bot.on('health', () => {
-    if (!bot || !bot.entity) return;
-
-    // Trigger action only if health drops from taking hits
-    if (bot.health < lastHealth) {
-      console.log(`[Alert] Damage taken! Current Health: ${bot.health}. Engaging counter-strike...`);
-      retaliate();
-    }
-    lastHealth = bot.health;
   });
 
   bot.on('error', (err) => {
@@ -165,33 +143,6 @@ function initBot() {
   });
 }
 
-// ----------------------------------------------------
-// Targeted Combat Self-Defense Framework
-// ----------------------------------------------------
-function retaliate() {
-  if (!bot || !botState.connected || !bot.entity) return;
-
-  // Search a 12-block target radius for what hit it
-  const target = bot.nearestEntity((entity) => {
-    return (entity.type === 'mob' || entity.type === 'player') && entity.position.distanceTo(bot.entity.position)  retaliate(), 600);
-  } else {
-    // Pathfind dash to close distance if they distance themselves
-    console.log(`[Closing Gap] Moving toward target at: ${Math.floor(target.position.x)}, ${Math.floor(target.position.z)}`);
-    
-    const goal = new GoalBlock(Math.floor(target.position.x), Math.floor(target.position.y), Math.floor(target.position.z));
-    bot.pathfinder.setGoal(goal);
-
-    // Halt movement and freeze again after 2.5s max
-    setTimeout(() => {
-      if (bot && botState.connected) {
-        bot.pathfinder.setGoal(null);
-        bot.clearControlStates();
-        retaliate();
-      }
-    }, 2500);
-  }
-}
-
 function handleDisconnect() {
   botState.connected = false;
   if (chatIntervalId) {
@@ -200,7 +151,6 @@ function handleDisconnect() {
   }
 
   if (bot) {
-    bot.pathfinder.setGoal(null);
     bot.removeAllListeners();
     bot = null;
   }
