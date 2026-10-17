@@ -7,28 +7,20 @@ const config = require('./settings.json');
 const express = require('express');
 
 const app = express();
-const PORT = process.env.PORT || 8080; // Swapped to 8080 to match your log layout
+const PORT = process.env.PORT || 8080;
 
 let bot = null;
 let reconnectTimeoutId = null;
 let connectionTimeoutId = null;
+let chatIntervalId = null;
 let isReconnecting = false;
-let movementIntervals = [];
+let lastHealth = 20;
 
 let botState = {
   connected: false,
-  lastActivity: Date.now(),
-  reconnectAttempts: 0,
   startTime: Date.now(),
-  errors: []
+  reconnectAttempts: 0
 };
-
-function formatUptime(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h}h ${m}m ${s}s`;
-}
 
 // ----------------------------------------------------
 // Web Dashboard Panel
@@ -75,20 +67,15 @@ app.get('/', (req, res) => {
             <div class="label">Server Link</div>
             <div class="value" style="font-size:1.1rem;color:#5eead4;">${config.server.ip}:${config.server.port}</div>
           </div>
-          <div class="card">
-            <div class="label">Coordinates</div>
-            <div class="value" id="coords-text">Syncing...</div>
-          </div>
-          <div class="footer">Auto-refreshing monitoring grid</div>
+          <div class="footer">Defensive Combat AFK Dashboard</div>
         </div>
         <script>
           async function update() {
             try {
               const r = await fetch('/health');
               const d = await r.json();
-              document.getElementById('status-text').innerText = d.status === 'connected' ? 'Online & Active' : 'Reconnecting...';
+              document.getElementById('status-text').innerText = d.status === 'connected' ? 'Online & Guarding' : 'Reconnecting...';
               document.getElementById('status-dot').className = d.status === 'connected' ? 'dot pulse' : 'dot offline pulse';
-              document.getElementById('coords-text').innerText = d.coords ? Math.floor(d.coords.x) + ', ' + Math.floor(d.coords.y) + ', ' + Math.floor(d.coords.z) : 'Loading...';
             } catch (e) {}
           }
           setInterval(update, 3000);
@@ -100,18 +87,15 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({
-    status: botState.connected ? 'connected' : 'disconnected',
-    coords: botState.connected && bot && bot.entity ? bot.entity.position : null
-  });
+  res.json({ status: botState.connected ? 'connected' : 'disconnected' });
 });
 
 // ----------------------------------------------------
-// Core Mineflayer Mechanics Execution Loop
+// Core Mineflayer Handshake & Retaliation Modules
 // ----------------------------------------------------
 function initBot() {
   if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
-  console.log(`[Connecting] Attempting login for: ${config['bot-account'].username}`);
+  console.log(`[Connecting] Initializing reactive combat guard for: ${config['bot-account'].username}`);
 
   const cleanUsername = config['bot-account'].username.trim().replace(/[^a-zA-Z0-9_]/g, '');
 
@@ -127,127 +111,118 @@ function initBot() {
 
   bot.once('spawn', () => {
     botState.connected = true;
-    console.log(`[Spawned] ${bot.username} joined successfully. Downloading chunks...`);
+    botState.reconnectAttempts = 0;
+    bot.clearControlStates();
+    
+    if (bot.entity) lastHealth = bot.health;
+    console.log(`[Spawned] ${bot.username} standing guard. Movement restricted until attacked.`);
 
-    // SAFETY CHECK: Ensure bot exists before executing auth commands
+    const movements = new Movements(bot);
+    bot.pathfinder.setMovements(movements);
+
+    // Handle authentication hooks safely
     if (config.utils['auto-auth'].enabled) {
       setTimeout(() => {
-        if (!bot || !botState.connected) return; // Crash prevention catch
+        if (!bot || !botState.connected) return;
         bot.chat(`/register ${config.utils['auto-auth'].password} ${config.utils['auto-auth'].password}`);
         bot.chat(`/login ${config.utils['auto-auth'].password}`);
-      }, 1500);
+      }, 2000);
     }
 
-    // Safely delay custom AI ticks to prevent packet rate kicks during login loading
-    setTimeout(() => {
-      if (!bot || !botState.connected) return;
-      console.log('[Active] Bot chunk sync settled. Activating movements.');
+    // Server-keeping anti-AFK chat broadcasts
+    if (config.utils['chat-messages'].enabled) {
+      if (chatIntervalId) clearInterval(chatIntervalId);
+      let msgIdx = 0;
+      chatIntervalId = setInterval(() => {
+        if (!bot || !botState.connected) return;
+        const msgs = config.utils['chat-messages'].messages;
+        bot.chat(msgs[msgIdx]);
+        msgIdx = (msgIdx + 1) % msgs.length;
+      }, config.utils['chat-messages']['repeat-delay'] * 1000);
+    }
+  });
 
-      const movements = new Movements(bot);
-      bot.pathfinder.setMovements(movements);
+  // COMBAT TRIGGER MODULE
+  bot.on('health', () => {
+    if (!bot || !bot.entity) return;
 
-      startBehaviorLoops();
-    }, 4000);
+    // Trigger action only if health drops from taking hits [1]
+    if (bot.health < lastHealth) {
+      console.log(`[Alert] Damage taken! Current Health: ${bot.health}. Engaging counter-strike...`);
+      retaliate();
+    }
+    lastHealth = bot.health;
   });
 
   bot.on('error', (err) => {
-    console.error('[Error Details]:', err.message);
+    console.error('[Exception Engine]:', err.message);
     handleDisconnect();
   });
 
   bot.on('end', (reason) => {
-    console.log(`[Offline] Socket terminated. Reason: ${reason}`);
+    console.log(`[Connection Dropped]: ${reason}`);
     handleDisconnect();
   });
 }
 
 // ----------------------------------------------------
-// Anti-AFK Engine Behaviors
+// Targeted Combat Self-Defense Framework
 // ----------------------------------------------------
-function startBehaviorLoops() {
-  clearBehaviorLoops();
+function retaliate() {
+  if (!bot || !botState.connected) return;
 
-  // 1. Text Message Broadcasting Engine Loop
-  if (config.utils['chat-messages'].enabled) {
-    let msgIdx = 0;
-    const chatInt = setInterval(() => {
-      if (!bot || !botState.connected) return;
-      const msgs = config.utils['chat-messages'].messages;
-      bot.chat(msgs[msgIdx]);
-      msgIdx = (msgIdx + 1) % msgs.length;
-    }, config.utils['chat-messages']['repeat-delay'] * 1000);
-    movementIntervals.push(chatInt);
-  }
+  // Search a 12-block target radius for what hit it [1]
+  const target = bot.nearestEntity((entity) => {
+    return (entity.type === 'mob' || entity.type === 'player') && entity.position.distanceTo(bot.entity.position)  retaliate(), 600);
+  } else {
+    // Pathfind dash to close distance if they distance themselves [1]
+    console.log(`[Closing Gap] Moving toward target at: ${Math.floor(target.position.x)}, ${Math.floor(target.position.z)}`);
+    
+    const goal = new GoalBlock(Math.floor(target.position.x), Math.floor(target.position.y), Math.floor(target.position.z));
+    bot.pathfinder.setGoal(goal);
 
-  // 2. Head Rotation Looking Engine Loop
-  if (config.movement.enabled && config.movement['look-around'].enabled) {
-    const lookInt = setInterval(() => {
-      if (!bot || !botState.connected) return;
-      const yaw = (Math.random() * 360 - 180) * (Math.PI / 180);
-      const pitch = (Math.random() * 90 - 45) * (Math.PI / 180);
-      bot.look(yaw, pitch, true);
-    }, config.movement['look-around'].interval);
-    movementIntervals.push(lookInt);
-  }
-
-  // 3. Jump Execution Trigger Loop
-  if (config.movement.enabled && config.movement['random-jump'].enabled) {
-    const jumpInt = setInterval(() => {
-      if (!bot || !botState.connected || !bot.entity.onGround) return;
-      bot.setControlState('jump', true);
-      setTimeout(() => { if (bot) bot.setControlState('jump', false); }, 500);
-    }, config.movement['random-jump'].interval);
-    movementIntervals.push(jumpInt);
-  }
-
-  // 4. Circle-Walking Physics Framework
-  if (config.movement.enabled && config.movement['circle-walk'].enabled) {
-    let angle = 0;
-    const walkInt = setInterval(() => {
-      if (!bot || !botState.connected) return;
-      bot.setControlState('forward', true);
-      angle += 0.2;
-      bot.look(angle, 0, true);
-    }, 150);
-    movementIntervals.push(walkInt);
-  }
-}
-
-function deleteConfigTimers() {
-  // Safe helper to empty background triggers
-  if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
-}
-
-function clearBehaviorLoops() {
-  movementIntervals.forEach(clearInterval);
-  movementIntervals = [];
-  if (bot) {
-    try { bot.clearControlStates(); } catch (e) {}
+    // Halt movement and freeze again after 2.5s max
+    setTimeout(() => {
+      if (bot && botState.connected) {
+        bot.pathfinder.setGoal(null);
+        bot.clearControlStates();
+        retaliate();
+      }
+    }, 2500);
   }
 }
 
 function handleDisconnect() {
   botState.connected = false;
-  clearBehaviorLoops();
+  if (chatIntervalId) {
+    clearInterval(chatIntervalId);
+    chatIntervalId = null;
+  }
 
   if (bot) {
+    bot.pathfinder.setGoal(null);
     bot.removeAllListeners();
     bot = null;
   }
 
   if (!isReconnecting) {
     isReconnecting = true;
-    const delay = config.utils['auto-reconnect-delay'] || 5000;
-    console.log(`[Cooldown] Reconnecting in ${delay / 1000} seconds...`);
+    botState.reconnectAttempts++;
+    
+    const configDelay = config.utils['auto-reconnect-delay'] || 5000;
+    const maxDelay = config.utils['max-reconnect-delay'] || 120000;
+    const currentDelay = Math.min(configDelay * botState.reconnectAttempts, maxDelay);
+
+    console.log(`[Offline] Retrying connection loop in ${currentDelay / 1000} seconds...`);
 
     reconnectTimeoutId = setTimeout(() => {
       isReconnecting = false;
       initBot();
-    }, delay);
+    }, currentDelay);
   }
 }
 
 app.listen(PORT, () => {
-  console.log(`[System Online] Web UI dashboard operating at port ${PORT}`);
+  console.log(`[System Online] Dashboard active on port ${PORT}`);
   initBot();
 });
