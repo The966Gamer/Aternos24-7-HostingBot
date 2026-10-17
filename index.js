@@ -32,6 +32,91 @@ function formatUptime(seconds) {
   const s = seconds % 60;
   return `${h}h ${m}m ${s}s`;
 }
+// ... (Place this right below your app.get('/tutorial') route)
+
+function initBot() {
+  // Clear any existing connection timeouts to prevent overlapping attempts
+  if (connectionTimeoutId) clearTimeout(connectionTimeoutId);
+
+  console.log('Spawning new bot instance...');
+  
+  bot = mineflayer.createBot({
+    host: config.server.ip,
+    port: config.server.port || 25565,
+    username: config.name,
+    version: config.server.version || false
+  });
+
+  // Load Pathfinder plugin if needed
+  bot.loadPlugin(pathfinder);
+
+  // CRITICAL FIX: Disable physics immediately upon joining to prevent invalid packet bugs
+  bot.once('spawn', () => {
+    bot.physics.enabled = false; 
+    botState.connected = true;
+    botState.lastActivity = Date.now();
+    botState.reconnectAttempts = 0;
+    console.log(`${bot.username} safely spawned. Waiting for server chunks...`);
+
+    // Wait 3 seconds for the chunk data to settle before allowing movement
+    setTimeout(() => {
+      if (bot && bot.physics) {
+        bot.physics.enabled = true;
+        console.log('Physics safely enabled.');
+      }
+    }, 3000);
+  });
+
+  // Handle errors gracefully to clear out the active session
+  bot.on('error', (err) => {
+    console.error('Bot encountered an error:', err);
+    pushError(err.message);
+    handleDisconnect();
+  });
+
+  bot.on('end', (reason) => {
+    console.log(`Bot disconnected. Reason: ${reason}`);
+    handleDisconnect();
+  });
+}
+
+function handleDisconnect() {
+  botState.connected = false;
+  
+  // Clean up listeners from the dead bot instance to prevent memory leaks
+  if (bot) {
+    bot.removeAllListeners();
+    bot = null;
+  }
+
+  // Prevent immediate, aggressive spamming. Add a 10-second delay between reconnect attempts.
+  if (!isReconnecting) {
+    isReconnecting = true;
+    botState.reconnectAttempts++;
+    console.log(`Reconnecting in 10 seconds... (Attempt #${botState.reconnectAttempts})`);
+    
+    reconnectTimeoutId = setTimeout(() => {
+      isReconnecting = false;
+      initBot();
+    }, 10000); 
+  }
+}
+
+// Health check endpoint for your web dashboard dashboard
+app.get('/health', (req, res) => {
+  res.json({
+    status: botState.connected ? 'connected' : 'disconnected',
+    uptime: Math.floor((Date.now() - botState.startTime) / 1000),
+    coords: botState.connected && bot.entity ? bot.entity.position : null,
+    attempts: botState.reconnectAttempts
+  });
+});
+
+// Start the Express Dashboard and initialize the bot
+app.listen(PORT, () => {
+  console.log(`Dashboard web server listening on port ${PORT}`);
+  initBot();
+});
 
 function pushError(entry) {
   botState.errors.push(entry);
